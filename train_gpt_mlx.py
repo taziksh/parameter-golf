@@ -1065,7 +1065,11 @@ def main() -> None:
     out_path = out_dir / f"{args.run_id}_mlx_model.npz"
     flat_state = {k: v for k, v in tree_flatten(model.state)}
     mx.savez(str(out_path), **flat_state)
-    log(f"saved_model:{out_path} bytes:{out_path.stat().st_size}")
+    model_bytes = out_path.stat().st_size
+    code_bytes = len(code.encode("utf-8"))
+    log(f"saved_model:{out_path} bytes:{model_bytes}")
+    log(f"code_size:{code_bytes} bytes")
+    log(f"submission_size:{model_bytes + code_bytes} bytes")
 
     quant_obj, quant_stats = quantize_state_dict_int8(flat_state)
     quant_raw = pickle.dumps(quant_obj, protocol=pickle.HIGHEST_PROTOCOL)
@@ -1080,6 +1084,7 @@ def main() -> None:
         f"serialized_model_int8_zlib:{quant_file_bytes} bytes "
         f"(payload:{quant_stats['int8_payload_bytes']} raw_pickle:{quant_serialized_bytes} payload_ratio:{ratio:.2f}x)"
     )
+    log(f"submission_size_int8_zlib:{quant_file_bytes + code_bytes} bytes")
 
     with quant_path.open("rb") as f:
         quant_blob_disk = f.read()
