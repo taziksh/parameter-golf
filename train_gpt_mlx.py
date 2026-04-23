@@ -26,6 +26,8 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx.utils import tree_flatten, tree_unflatten
 
+from noble_mlx import NOBLELinear, is_noble_branch_key, noble_lr_mults_for_gpt_linears
+
 # ==============================================================================
 # SHARD FORMAT + COMPUTE DTYPE
 # ==============================================================================
@@ -80,6 +82,18 @@ class Hyperparameters:
     logit_softcap: float = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
     rope_base: float = float(os.environ.get("ROPE_BASE", 10000.0))
     qk_gain_init: float = float(os.environ.get("QK_GAIN_INIT", 1.5))
+
+    # NOBLE nonlinear low-rank branch (per-linear attachment). Disabled by default.
+    use_noble: bool = bool(int(os.environ.get("USE_NOBLE", "0")))
+    lora_rank: int = int(os.environ.get("LORA_RANK", 32))
+
+    # Muon vs Adam for the main block matrices. The NOBLE paper uses AdamW
+    # throughout; its (d/r)^gamma lr_mults only make sense on Adam-family
+    # updates. Set USE_MUON=0 to route all block matrices through Adam at
+    # matrix_adam_lr, matching the paper setup. Default keeps Muon for the
+    # baseline (what our codebase is tuned for).
+    use_muon: bool = bool(int(os.environ.get("USE_MUON", "1")))
+    matrix_adam_lr: float = float(os.environ.get("MATRIX_ADAM_LR", 3e-4))
 
     # Optimizer. We keep the same per-group defaults as train_gpt.py.
     beta1: float = float(os.environ.get("BETA1", 0.9))
@@ -304,6 +318,8 @@ class CausalSelfAttention(nn.Module):
         num_kv_heads: int,
         rope_base: float,
         qk_gain_init: float,
+        use_noble: bool = False,
+        lora_rank: int = 32,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -316,10 +332,15 @@ class CausalSelfAttention(nn.Module):
         if self.head_dim % 2 != 0:
             raise ValueError("head_dim must be even for RoPE")
         kv_dim = self.num_kv_heads * self.head_dim
-        self.c_q = CastedLinear(dim, dim)
-        self.c_k = CastedLinear(dim, kv_dim)
-        self.c_v = CastedLinear(dim, kv_dim)
-        self.proj = CastedLinear(dim, dim)
+        make_linear = (
+            (lambda in_d, out_d: NOBLELinear(in_d, out_d, lora_rank=lora_rank))
+            if use_noble else
+            CastedLinear
+        )
+        self.c_q = make_linear(dim, dim)
+        self.c_k = make_linear(dim, kv_dim)
+        self.c_v = make_linear(dim, kv_dim)
+        self.proj = make_linear(dim, dim)
         self.q_gain = mx.ones((num_heads,), dtype=mx.float32) * qk_gain_init
         self.rope = nn.RoPE(self.head_dim, traditional=False, base=rope_base)
         self.scale = self.head_dim ** -0.5
@@ -340,11 +361,16 @@ class CausalSelfAttention(nn.Module):
 
 class MLP(nn.Module):
     # Baseline MLP uses relu^2 instead of GELU/SiLU. It is cheap and works well in this setup.
-    def __init__(self, dim: int, mlp_mult: int):
+    def __init__(self, dim: int, mlp_mult: int, use_noble: bool = False, lora_rank: int = 32):
         super().__init__()
         hidden = dim * mlp_mult
-        self.fc = CastedLinear(dim, hidden)
-        self.proj = CastedLinear(hidden, dim)
+        make_linear = (
+            (lambda in_d, out_d: NOBLELinear(in_d, out_d, lora_rank=lora_rank))
+            if use_noble else
+            CastedLinear
+        )
+        self.fc = make_linear(dim, hidden)
+        self.proj = make_linear(hidden, dim)
 
     def __call__(self, x: mx.array) -> mx.array:
         x = nn.relu(self.fc(x))
@@ -360,12 +386,17 @@ class Block(nn.Module):
         mlp_mult: int,
         rope_base: float,
         qk_gain_init: float,
+        use_noble: bool = False,
+        lora_rank: int = 32,
     ):
         super().__init__()
         self.attn_norm = RMSNormNoWeight()
         self.mlp_norm = RMSNormNoWeight()
-        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init)
-        self.mlp = MLP(dim, mlp_mult)
+        self.attn = CausalSelfAttention(
+            dim, num_heads, num_kv_heads, rope_base, qk_gain_init,
+            use_noble=use_noble, lora_rank=lora_rank,
+        )
+        self.mlp = MLP(dim, mlp_mult, use_noble=use_noble, lora_rank=lora_rank)
         self.attn_scale = mx.ones((dim,), dtype=mx.float32)
         self.mlp_scale = mx.ones((dim,), dtype=mx.float32)
         self.resid_mix = mx.array(np.stack((np.ones((dim,), dtype=np.float32), np.zeros((dim,), dtype=np.float32))))
@@ -386,7 +417,7 @@ class GPT(nn.Module):
     # - tied embeddings for the LM head (the baseline default setup)
     def __init__(self, vocab_size: int, num_layers: int, dim: int, num_heads: int, num_kv_heads: int, mlp_mult: int,
                  logit_chunk_tokens: int, logit_softcap: float, rope_base: float, tied_embed_init_std: float,
-                 qk_gain_init: float):
+                 qk_gain_init: float, use_noble: bool = False, lora_rank: int = 32):
         super().__init__()
         if logit_softcap <= 0.0:
             raise ValueError(f"logit_softcap must be positive, got {logit_softcap}")
@@ -399,7 +430,8 @@ class GPT(nn.Module):
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
         self.skip_weights = mx.ones((self.num_skip_weights, dim), dtype=mx.float32)
         self.blocks = [
-            Block(dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init)
+            Block(dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init,
+                  use_noble=use_noble, lora_rank=lora_rank)
             for i in range(num_layers)
         ]
         self.final_norm = RMSNormNoWeight()
@@ -457,9 +489,16 @@ class GPT(nn.Module):
 class Muon:
     # Muon applies SGD-momentum to matrix gradients, then orthogonalizes the result before the
     # parameter update.
-    def __init__(self, keys: list[str], params: dict[str, mx.array], args: Hyperparameters):
+    def __init__(
+        self,
+        keys: list[str],
+        params: dict[str, mx.array],
+        args: Hyperparameters,
+        lr_mults: dict[str, float] | None = None,
+    ):
         self.keys = keys
         self.args = args
+        self.lr_mults = lr_mults or {}
         self.buffers = {k: mx.zeros_like(params[k]) for k in keys}
 
     def step(self, params: dict[str, mx.array], grads: dict[str, mx.array], step: int, lr_mul: float) -> dict[str, mx.array]:
@@ -468,7 +507,7 @@ class Muon:
             momentum = (1.0 - t) * self.args.muon_momentum_warmup_start + t * self.args.muon_momentum
         else:
             momentum = self.args.muon_momentum
-        lr = self.args.matrix_lr * lr_mul
+        base_lr = self.args.matrix_lr * lr_mul
         out: dict[str, mx.array] = {}
         for k in self.keys:
             p = params[k]
@@ -478,42 +517,97 @@ class Muon:
             g_eff = g + momentum * buf
             g_ortho = zeropower_newtonschulz5(g_eff, self.args.muon_backend_steps)
             scale = math.sqrt(max(1.0, float(p.shape[0]) / float(p.shape[1])))
+            lr = base_lr * self.lr_mults.get(k, 1.0)
             out[k] = p - lr * (g_ortho * scale).astype(p.dtype)
         return out
 
 
 class SplitOptimizers:
-    # - embeddings: Adam with the tied-embedding LR
-    # - block matrices (2D): Muon
-    # - block scalars + skip weights: Adam
-    # This preserves the high-level optimization behavior even though MLX internals differ.
+    # Two modes, selected by args.use_muon:
+    #
+    # use_muon=True (default, baseline-tuned):
+    #   - embeddings: Adam (tied_embed_lr)
+    #   - main block matrices (2D, non-NOBLE): Muon (matrix_lr)
+    #   - NOBLE branch 2D + block scalars + skip weights: bucketed Adam
+    #       * NOBLE branch 2D uses matrix_adam_lr as base
+    #       * 1D scalars use scalar_lr as base
+    #       * bucketed by lr_mult
+    #
+    # use_muon=False (paper-faithful for NOBLE experiments):
+    #   - embeddings: Adam (tied_embed_lr)
+    #   - ALL block matrices (NOBLE or not): bucketed Adam at matrix_adam_lr
+    #   - block scalars + skip weights: bucketed Adam at scalar_lr
+    #
+    # Why two modes: the paper (arXiv:2603.06492) uses AdamW for everything,
+    # and its (d/r)^gamma lr_mults were derived for Adam's v-normalized updates.
+    # Stacking those lr_mults on top of Muon's already-magnitude-normalized
+    # update blows weights up at step 2. To reproduce the paper faithfully, set
+    # USE_MUON=0.
     def __init__(self, model: GPT, args: Hyperparameters):
         self.args = args
         params = dict(tree_flatten(model.parameters()))
+        self.lr_mults: dict[str, float] = noble_lr_mults_for_gpt_linears(model)
         self.embed_key = "tok_emb.weight"
-        self.matrix_keys = [
-            k
-            for k, p in params.items()
-            if k.startswith("blocks.") and p.ndim == 2 and not any(pattern in k for pattern in CONTROL_TENSOR_NAME_PATTERNS)
+
+        is_block_2d = lambda k, p: (
+            k.startswith("blocks.")
+            and p.ndim == 2
+            and not any(pattern in k for pattern in CONTROL_TENSOR_NAME_PATTERNS)
+        )
+        # Matrix routing (2D weights).
+        if args.use_muon:
+            self.matrix_keys = [k for k, p in params.items() if is_block_2d(k, p) and not is_noble_branch_key(k)]
+        else:
+            self.matrix_keys = []  # Muon disabled
+        # All NOBLE-owned params (2D AND 1D: lora_*, cos_net.*) use the paper's
+        # matrix_adam_lr as base so the (d/r)^gamma lr_mults land where the
+        # paper designed them.
+        self.adam_matrix_keys = [
+            k for k, p in params.items()
+            if k.startswith("blocks.") and (
+                (is_block_2d(k, p) and (is_noble_branch_key(k) or not args.use_muon))
+                or (p.ndim == 1 and is_noble_branch_key(k))
+            )
         ]
+        # Non-NOBLE 1D controls + skip_weights stay on scalar_lr (existing tuning).
         self.scalar_keys = [
             k
             for k, p in params.items()
-            if k == "skip_weights" or (k.startswith("blocks.") and (p.ndim < 2 or any(pattern in k for pattern in CONTROL_TENSOR_NAME_PATTERNS)))
+            if not is_noble_branch_key(k) and (
+                k == "skip_weights"
+                or (k.startswith("blocks.") and (p.ndim < 2 or any(pattern in k for pattern in CONTROL_TENSOR_NAME_PATTERNS)))
+            )
         ]
 
-        self.muon = Muon(self.matrix_keys, params, args)
+        self.muon = Muon(self.matrix_keys, params, args, self.lr_mults) if args.use_muon else None
         self.adam_embed = optim.Adam(
             learning_rate=args.tied_embed_lr,
             betas=[args.beta1, args.beta2],
             eps=args.adam_eps,
             bias_correction=True,
         )
-        self.adam_scalar = optim.Adam(
-            learning_rate=args.scalar_lr,
-            betas=[args.beta1, args.beta2],
-            eps=args.adam_eps,
-            bias_correction=True,
+        # Two separate bucket groups so matrix and scalar Adam can have different base LRs.
+        def _build_buckets(keys: list[str], base_lr: float) -> list[tuple[float, float, list[str], optim.Adam]]:
+            grouped: dict[float, list[str]] = {}
+            for k in keys:
+                grouped.setdefault(self.lr_mults.get(k, 1.0), []).append(k)
+            return [
+                (
+                    base_lr,
+                    mult,
+                    group_keys,
+                    optim.Adam(
+                        learning_rate=base_lr,
+                        betas=[args.beta1, args.beta2],
+                        eps=args.adam_eps,
+                        bias_correction=True,
+                    ),
+                )
+                for mult, group_keys in grouped.items()
+            ]
+        self.adam_buckets = (
+            _build_buckets(self.adam_matrix_keys, args.matrix_adam_lr)
+            + _build_buckets(self.scalar_keys, args.scalar_lr)
         )
 
     def step(self, model: GPT, grads_tree: dict, step: int, lr_mul: float) -> None:
@@ -521,7 +615,8 @@ class SplitOptimizers:
         grads = dict(tree_flatten(grads_tree))
         updated = dict(params)
 
-        updated.update(self.muon.step(params, grads, step=step, lr_mul=lr_mul))
+        if self.muon is not None:
+            updated.update(self.muon.step(params, grads, step=step, lr_mul=lr_mul))
 
         self.adam_embed.learning_rate = self.args.tied_embed_lr * lr_mul
         updated.update(
@@ -531,10 +626,14 @@ class SplitOptimizers:
             )
         )
 
-        self.adam_scalar.learning_rate = self.args.scalar_lr * lr_mul
-        scalar_grads = {k: grads[k] for k in self.scalar_keys}
-        scalar_params = {k: params[k] for k in self.scalar_keys}
-        updated.update(self.adam_scalar.apply_gradients(scalar_grads, scalar_params))
+        for base_lr, mult, keys, adam in self.adam_buckets:
+            adam.learning_rate = base_lr * lr_mul * mult
+            updated.update(
+                adam.apply_gradients(
+                    {k: grads[k] for k in keys},
+                    {k: params[k] for k in keys},
+                )
+            )
 
         model.update(tree_unflatten(list(updated.items())))
 
@@ -897,6 +996,8 @@ def main() -> None:
         rope_base=args.rope_base,
         tied_embed_init_std=args.tied_embed_init_std,
         qk_gain_init=args.qk_gain_init,
+        use_noble=args.use_noble,
+        lora_rank=args.lora_rank,
     )
     opt = SplitOptimizers(model, args)
 
@@ -944,11 +1045,15 @@ def main() -> None:
     )
     log(f"mlx_max_microbatch_tokens:{args.mlx_max_microbatch_tokens}")
     log(
-        f"optimizer:muon+adam muon_matrix_params:{len(opt.matrix_keys)} scalar_params:{len(opt.scalar_keys)} "
-        f"embed_lr:{args.tied_embed_lr} "
-        f"matrix_lr:{args.matrix_lr} scalar_lr:{args.scalar_lr} "
+        f"optimizer:{'muon+adam' if args.use_muon else 'adam-only'} "
+        f"muon_matrix_params:{len(opt.matrix_keys)} adam_matrix_params:{len(opt.adam_matrix_keys)} "
+        f"scalar_params:{len(opt.scalar_keys)} "
+        f"adam_buckets:{len(opt.adam_buckets)} lr_mult_overrides:{len(opt.lr_mults)} "
+        f"embed_lr:{args.tied_embed_lr} matrix_lr:{args.matrix_lr} "
+        f"matrix_adam_lr:{args.matrix_adam_lr} scalar_lr:{args.scalar_lr} "
         f"muon_momentum:{args.muon_momentum} muon_steps:{args.muon_backend_steps}"
     )
+    log(f"noble:{int(args.use_noble)} lora_rank:{args.lora_rank if args.use_noble else '-'} use_muon:{int(args.use_muon)}")
     log(f"val_bpb:enabled tokenizer_kind=sentencepiece tokenizer_path={args.tokenizer_path}")
     log(f"compute_dtype:{COMPUTE_DTYPE} compile:True")
     log(
