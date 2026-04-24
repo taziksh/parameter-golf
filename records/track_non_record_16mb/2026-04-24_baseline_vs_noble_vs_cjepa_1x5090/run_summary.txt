@@ -1,0 +1,10 @@
+baseline_seed1337 iters=4000 seed=1337 wallclock_seconds=2578 rc=0
+baseline_seed1338 iters=4000 seed=1338 wallclock_seconds=2600 rc=0
+baseline_seed1339 iters=4000 seed=1339 wallclock_seconds=2598 rc=0
+noble_seed1337 iters=4000 seed=1337 wallclock_seconds=3574 rc=0
+noble_seed1338 iters=4000 seed=1338 wallclock_seconds=3572 rc=0
+noble_seed1339 iters=4000 seed=1339 wallclock_seconds=3570 rc=0
+jepa_seed1337 iters=4000 seed=1337 wallclock_seconds=2981 rc=0
+jepa_seed1338 iters=4000 seed=1338 wallclock_seconds=2980 rc=0
+jepa_seed1339 iters=4000 seed=1339 wallclock_seconds=2959 rc=0
+jepa_seed1340_double iters=8000 seed=1340 wallclock_seconds=5848 rc=0
