@@ -27,6 +27,8 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from noble import NOBLELinear, is_noble_branch_key, noble_lr_mults_for_gpt_linears
+
 # -----------------------------
 # HYPERPARAMETERS
 # -----------------------------
@@ -85,6 +87,13 @@ class Hyperparameters:
     beta2 = float(os.environ.get("BETA2", 0.95))
     adam_eps = float(os.environ.get("ADAM_EPS", 1e-8))
     grad_clip_norm = float(os.environ.get("GRAD_CLIP_NORM", 0.0))
+
+    # NOBLE nonlinear low-rank branch (per-linear attachment). Disabled by default.
+    use_noble = bool(int(os.environ.get("USE_NOBLE", "0")))
+    lora_rank = int(os.environ.get("LORA_RANK", 32))
+    # Set USE_MUON=0 to route block matrices through Adam at matrix_adam_lr (paper-faithful for NOBLE).
+    use_muon = bool(int(os.environ.get("USE_MUON", "1")))
+    matrix_adam_lr = float(os.environ.get("MATRIX_ADAM_LR", 3e-4))
 
 # -----------------------------
 # MUON OPTIMIZER 
@@ -560,6 +569,8 @@ class CausalSelfAttention(nn.Module):
         num_kv_heads: int,
         rope_base: float,
         qk_gain_init: float,
+        use_noble: bool = False,
+        lora_rank: int = 32,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -572,11 +583,17 @@ class CausalSelfAttention(nn.Module):
         if self.head_dim % 2 != 0:
             raise ValueError("head_dim must be even for RoPE")
         kv_dim = self.num_kv_heads * self.head_dim
-        self.c_q = CastedLinear(dim, dim, bias=False)
-        self.c_k = CastedLinear(dim, kv_dim, bias=False)
-        self.c_v = CastedLinear(dim, kv_dim, bias=False)
-        self.proj = CastedLinear(dim, dim, bias=False)
-        self.proj._zero_init = True
+        make_linear = (
+            (lambda i, o: NOBLELinear(i, o, lora_rank=lora_rank, bias=False))
+            if use_noble else
+            (lambda i, o: CastedLinear(i, o, bias=False))
+        )
+        self.c_q = make_linear(dim, dim)
+        self.c_k = make_linear(dim, kv_dim)
+        self.c_v = make_linear(dim, kv_dim)
+        self.proj = make_linear(dim, dim)
+        if not use_noble:
+            self.proj._zero_init = True
         self.q_gain = nn.Parameter(torch.full((num_heads,), qk_gain_init, dtype=torch.float32))
         self.rotary = Rotary(self.head_dim, base=rope_base)
 
@@ -605,12 +622,18 @@ class CausalSelfAttention(nn.Module):
 
 class MLP(nn.Module):
     # relu^2 MLP from the original modded-nanogpt setup
-    def __init__(self, dim: int, mlp_mult: int):
+    def __init__(self, dim: int, mlp_mult: int, use_noble: bool = False, lora_rank: int = 32):
         super().__init__()
         hidden = mlp_mult * dim
-        self.fc = CastedLinear(dim, hidden, bias=False)
-        self.proj = CastedLinear(hidden, dim, bias=False)
-        self.proj._zero_init = True
+        make_linear = (
+            (lambda i, o: NOBLELinear(i, o, lora_rank=lora_rank, bias=False))
+            if use_noble else
+            (lambda i, o: CastedLinear(i, o, bias=False))
+        )
+        self.fc = make_linear(dim, hidden)
+        self.proj = make_linear(hidden, dim)
+        if not use_noble:
+            self.proj._zero_init = True
 
     def forward(self, x: Tensor) -> Tensor:
         x = torch.relu(self.fc(x))
@@ -626,12 +649,17 @@ class Block(nn.Module):
         mlp_mult: int,
         rope_base: float,
         qk_gain_init: float,
+        use_noble: bool = False,
+        lora_rank: int = 32,
     ):
         super().__init__()
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
-        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init)
-        self.mlp = MLP(dim, mlp_mult)
+        self.attn = CausalSelfAttention(
+            dim, num_heads, num_kv_heads, rope_base, qk_gain_init,
+            use_noble=use_noble, lora_rank=lora_rank,
+        )
+        self.mlp = MLP(dim, mlp_mult, use_noble=use_noble, lora_rank=lora_rank)
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
@@ -659,6 +687,8 @@ class GPT(nn.Module):
         logit_softcap: float,
         rope_base: float,
         qk_gain_init: float,
+        use_noble: bool = False,
+        lora_rank: int = 32,
     ):
         super().__init__()
         if logit_softcap <= 0.0:
@@ -680,6 +710,8 @@ class GPT(nn.Module):
                     mlp_mult,
                     rope_base,
                     qk_gain_init,
+                    use_noble=use_noble,
+                    lora_rank=lora_rank,
                 )
                 for i in range(num_layers)
             ]
@@ -835,9 +867,11 @@ def main() -> None:
         logit_softcap=args.logit_softcap,
         rope_base=args.rope_base,
         qk_gain_init=args.qk_gain_init,
+        use_noble=args.use_noble,
+        lora_rank=args.lora_rank,
     ).to(device).bfloat16()
     for module in base_model.modules():
-        if isinstance(module, CastedLinear):
+        if isinstance(module, (CastedLinear, NOBLELinear)):
             module.float()
     restore_low_dim_params_to_fp32(base_model)
     compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
@@ -846,21 +880,54 @@ def main() -> None:
     # Optimizer split:
     # - token embedding (Adam) uses EMBED_LR
     # - untied lm_head (Adam) uses HEAD_LR
-    # - matrix params in transformer blocks use MATRIX_LR via Muon
-    # - vectors/scalars use SCALAR_LR via Adam
-    block_named_params = list(base_model.blocks.named_parameters())
-    matrix_params = [
-        p
-        for name, p in block_named_params
-        if p.ndim == 2 and not any(pattern in name for pattern in CONTROL_TENSOR_NAME_PATTERNS)
+    # - non-NOBLE block matrix params: Muon at MATRIX_LR (use_muon=True) or
+    #   Adam at MATRIX_ADAM_LR (use_muon=False, paper-faithful for NOBLE)
+    # - NOBLE branch params (lora_*, cos_net.*): Adam at MATRIX_ADAM_LR for 2D,
+    #   SCALAR_LR for 1D, bucketed by per-param lr_mult (d/r)^gamma
+    # - other 1D scalars + skip_weights: Adam at SCALAR_LR
+    lr_mults: dict[str, float] = noble_lr_mults_for_gpt_linears(base_model) if args.use_noble else {}
+
+    def is_control(name: str) -> bool:
+        return any(pattern in name for pattern in CONTROL_TENSOR_NAME_PATTERNS)
+
+    block_named_params = [
+        (f"blocks.{name}", p) for name, p in base_model.blocks.named_parameters()
     ]
-    scalar_params = [
-        p
-        for name, p in block_named_params
-        if p.ndim < 2 or any(pattern in name for pattern in CONTROL_TENSOR_NAME_PATTERNS)
-    ]
+    muon_matrix_params: list[Tensor] = []
+    adam_matrix_named: list[tuple[str, Tensor]] = []
+    scalar_named: list[tuple[str, Tensor]] = []
+    for name, p in block_named_params:
+        if p.ndim == 2 and not is_control(name):
+            if is_noble_branch_key(name):
+                adam_matrix_named.append((name, p))
+            elif args.use_muon:
+                muon_matrix_params.append(p)
+            else:
+                adam_matrix_named.append((name, p))
+        else:
+            scalar_named.append((name, p))
     if base_model.skip_weights.numel() > 0:
-        scalar_params.append(base_model.skip_weights)
+        scalar_named.append(("skip_weights", base_model.skip_weights))
+
+    def build_adam_buckets(
+        named: list[tuple[str, Tensor]], base_lr: float
+    ) -> list[torch.optim.Optimizer]:
+        grouped: dict[float, list[Tensor]] = {}
+        for name, p in named:
+            grouped.setdefault(lr_mults.get(name, 1.0), []).append(p)
+        opts: list[torch.optim.Optimizer] = []
+        for mult, params in grouped.items():
+            lr = base_lr * mult
+            opts.append(
+                torch.optim.Adam(
+                    [{"params": params, "lr": lr, "base_lr": lr}],
+                    betas=(args.beta1, args.beta2),
+                    eps=args.adam_eps,
+                    fused=True,
+                )
+            )
+        return opts
+
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
     optimizer_tok = torch.optim.Adam(
         [{"params": [base_model.tok_emb.weight], "lr": token_lr, "base_lr": token_lr}],
@@ -868,21 +935,21 @@ def main() -> None:
         eps=args.adam_eps,
         fused=True,
     )
-    optimizer_muon = Muon(
-        matrix_params,
-        lr=args.matrix_lr,
-        momentum=args.muon_momentum,
-        backend_steps=args.muon_backend_steps,
-    )
-    for group in optimizer_muon.param_groups:
-        group["base_lr"] = args.matrix_lr
-    optimizer_scalar = torch.optim.Adam(
-        [{"params": scalar_params, "lr": args.scalar_lr, "base_lr": args.scalar_lr}],
-        betas=(args.beta1, args.beta2),
-        eps=args.adam_eps,
-        fused=True,
-    )
-    optimizers: list[torch.optim.Optimizer] = [optimizer_tok, optimizer_muon, optimizer_scalar]
+    optimizers: list[torch.optim.Optimizer] = [optimizer_tok]
+    if muon_matrix_params:
+        optimizer_muon = Muon(
+            muon_matrix_params,
+            lr=args.matrix_lr,
+            momentum=args.muon_momentum,
+            backend_steps=args.muon_backend_steps,
+        )
+        for group in optimizer_muon.param_groups:
+            group["base_lr"] = args.matrix_lr
+        optimizers.append(optimizer_muon)
+    else:
+        optimizer_muon = None
+    optimizers.extend(build_adam_buckets(adam_matrix_named, args.matrix_adam_lr))
+    optimizers.extend(build_adam_buckets(scalar_named, args.scalar_lr))
     if base_model.lm_head is not None:
         optimizer_head = torch.optim.Adam(
             [{"params": [base_model.lm_head.weight], "lr": args.head_lr, "base_lr": args.head_lr}],
@@ -900,7 +967,14 @@ def main() -> None:
     log0(
         f"tie_embeddings:{args.tie_embeddings} embed_lr:{token_lr} "
         f"head_lr:{args.head_lr if base_model.lm_head is not None else 0.0} "
-        f"matrix_lr:{args.matrix_lr} scalar_lr:{args.scalar_lr}"
+        f"matrix_lr:{args.matrix_lr} matrix_adam_lr:{args.matrix_adam_lr} scalar_lr:{args.scalar_lr}"
+    )
+    log0(
+        f"noble:{int(args.use_noble)} lora_rank:{args.lora_rank if args.use_noble else '-'} "
+        f"use_muon:{int(args.use_muon)} "
+        f"muon_matrix_params:{len(muon_matrix_params)} "
+        f"adam_matrix_params:{len(adam_matrix_named)} scalar_params:{len(scalar_named)} "
+        f"lr_mult_overrides:{len(lr_mults)}"
     )
     log0(
         f"train_batch_tokens:{args.train_batch_tokens} train_seq_len:{args.train_seq_len} "
@@ -1020,8 +1094,9 @@ def main() -> None:
 
         frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
         muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
-        for group in optimizer_muon.param_groups:
-            group["momentum"] = muon_momentum
+        if optimizer_muon is not None:
+            for group in optimizer_muon.param_groups:
+                group["momentum"] = muon_momentum
 
         for opt in optimizers:
             for group in opt.param_groups:
