@@ -1,0 +1,3 @@
+branch	seed	iters	val_bpb	val_loss
+baseline	42	4550	1.08077590	2.79175639
+intradoc	42	4550	1.08091991	2.79212840
