@@ -1,6 +1,6 @@
 # Partial results: BASELINE done, intradoc still running
 
-**As of 2026-04-26T17:14:28Z: baseline finished cleanly (rc=0). Intradoc started 17:08:58Z, in progress.**
+**As of 2026-04-26T17:15:07Z: baseline finished cleanly (rc=0). Intradoc started 17:08:58Z, in progress.**
 This file is committed early so the baseline number is safe off-disk.
 A full README.md will replace it once both runs complete.
 
@@ -8,16 +8,16 @@ A full README.md will replace it once both runs complete.
 
 | eval flavor | val_loss | val_bpb |
 |---|---:|---:|
-| pre-quantization post-ema (fp32) |  |  |
-| quantized (int6+brotli, packed eval) |  |  |
-| **quantized_sliding_window (scored)** | **** | **** |
+| pre-quantization post-ema (fp32) | 2.80317150 | 1.08519504 |
+| quantized (int6+brotli, packed eval) | 2.83527535 | 1.09762344 |
+| **quantized_sliding_window (scored)** | **2.79175639** | **1.08077590** |
 
 Total submission size: 16,024,779 bytes (int6+brotli artifact 15,976,196 + code 48,583).
 
 ## Setup
 
 - Hardware: 1×H100 80GB
-- Branch: `doc-mask` @ 8c6fb1b
+- Branch: `doc-mask` @ 3e0ef94
 - Data: SP8192, 80 train shards, `MATCHED_FINEWEB_REPO_ID=kevclark/parameter-golf`
 - Iterations: 4550, `MAX_WALLCLOCK_SECONDS=0`, `TTT_ENABLED=0`, SEED=42
 - Model: 35,944,536 params, 11 layers, model_dim=512, vocab=8192
