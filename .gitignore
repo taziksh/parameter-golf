@@ -9,3 +9,12 @@ data/docs_selected.jsonl
 .mypy_cache/
 .venv
 logs/
+
+# work/intradoc run outputs
+work/intradoc/logs/
+work/intradoc/artifacts/
+work/intradoc/final_model.pt
+work/intradoc/final_model.int6.ptz
+work/intradoc/bench_v2_results.txt
+work/intradoc/save_intradoc_artifact.sh
+work/intradoc/bench_attn_v1.py
