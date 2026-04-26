@@ -1,0 +1,310 @@
+==== pipeline start: 2026-04-26T15:30:32Z ====
+==== data: downloading 80 shards + tokenizer (2026-04-26T15:30:32Z) ====
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+train_shards_on_disk=80
+val_shards_on_disk=1
+fineweb_8192_bpe.model
+fineweb_8192_bpe.vocab
+==== baseline: start (2026-04-26T15:31:56Z) ====
+Hyperparameters:
+  adam_eps: 1e-08
+  adam_wd: 0.02
+  beta1: 0.9
+  beta2: 0.95
+  compressor: brotli
+  data_dir: ./data
+  datasets_dir: ./data/datasets/fineweb10B_sp8192
+  distributed: False
+  ema_decay: 0.9965
+  embed_bits: 8
+  embed_clip_sigmas: 20.0
+  embed_lr: 0.6
+  embed_wd: 0.085
+  embedding_dim: 512
+  enable_looping_at: 0.35
+  etlb_clip: 3.0
+  etlb_enabled: False
+  etlb_lr: 0.05
+  etlb_steps: 5
+  eval_seq_len: 2048
+  eval_stride: 64
+  gptq_calibration_batches: 64
+  gptq_reserve_seconds: 12.0
+  grad_accum_steps: 8
+  grad_clip_norm: 0.3
+  head_lr: 0.008
+  is_main_process: True
+  iterations: 4550
+  ln_scale: True
+  local_rank: 0
+  logfile: logs/baseline.txt
+  logit_softcap: 30.0
+  loop_end: 5
+  loop_start: 3
+  matrix_bits: 6
+  matrix_clip_sigmas: 12.85
+  matrix_lr: 0.022
+  max_wallclock_seconds: 0.0
+  min_lr: 0.0
+  mlp_mult: 4.0
+  model_dim: 512
+  model_path: final_model.pt
+  muon_backend_steps: 5
+  muon_beta2: 0.95
+  muon_momentum: 0.99
+  muon_momentum_warmup_start: 0.92
+  muon_momentum_warmup_steps: 1500
+  muon_row_normalize: True
+  muon_wd: 0.095
+  num_heads: 8
+  num_kv_heads: 4
+  num_layers: 11
+  num_loops: 2
+  parallel_residual_start: 7
+  qk_gain_init: 5.0
+  quantized_model_path: final_model.int6.ptz
+  rank: 0
+  rope_base: 10000.0
+  rope_dims: 16
+  rope_train_seq_len: 2048
+  run_id: baseline
+  scalar_lr: 0.02
+  seed: 42
+  skip_gates_enabled: True
+  sliding_window_enabled: True
+  tie_embeddings: True
+  tied_embed_init_std: 0.005
+  tied_embed_lr: 0.03
+  tokenizer_path: ./data/tokenizers/fineweb_8192_bpe.model
+  train_batch_tokens: 786432
+  train_files: ./data/datasets/fineweb10B_sp8192/fineweb_train_*.bin
+  train_log_every: 500
+  train_seq_len: 2048
+  ttt_chunk_tokens: 32768
+  ttt_enabled: False
+  ttt_epochs: 3
+  ttt_lr: 0.005
+  ttt_momentum: 0.9
+  val_batch_tokens: 524288
+  val_files: ./data/datasets/fineweb10B_sp8192/fineweb_val_*.bin
+  val_loss_every: 4000
+  vocab_size: 8192
+  warmdown_frac: 0.72
+  warmup_steps: 20
+  world_size: 1
+  xsa_last_n: 11
+train_shards: 80
+val_tokens: 40540160
+model_params:35944536
+warmup_step: 1/20
+warmup_step: 2/20
+warmup_step: 3/20
+warmup_step: 4/20
+warmup_step: 5/20
+warmup_step: 6/20
+warmup_step: 10/20
+warmup_step: 20/20
+loop_warmup:enabled encoder:[0, 1, 2, 3, 4, 5, 3, 4] decoder:[5, 3, 4, 5, 6, 7, 8, 9, 10]
+loop_warmup_step: 1/20
+loop_warmup_step: 2/20
+loop_warmup_step: 3/20
+loop_warmup_step: 4/20
+loop_warmup_step: 5/20
+loop_warmup_step: 6/20
+loop_warmup_step: 10/20
+loop_warmup_step: 20/20
+0/4550 val_loss: 9.0090 val_bpb: 3.4877
+1/4550 train_loss: 9.0096 train_time: 0.0m tok/s: 1057905
+2/4550 train_loss: 12.3333 train_time: 0.0m tok/s: 1049285
+3/4550 train_loss: 11.1243 train_time: 0.0m tok/s: 1042789
+4/4550 train_loss: 9.5136 train_time: 0.1m tok/s: 1039714
+5/4550 train_loss: 8.3429 train_time: 0.1m tok/s: 1038500
+500/4550 train_loss: 3.3447 train_time: 6.4m tok/s: 1023511
+1000/4550 train_loss: 3.2270 train_time: 12.8m tok/s: 1024221
+1500/4550 train_loss: 3.1560 train_time: 19.2m tok/s: 1024537
+layer_loop:enabled step:1593 frac:0.350 encoder:[0, 1, 2, 3, 4, 5, 3, 4] decoder:[5, 3, 4, 5, 6, 7, 8, 9, 10]
+2000/4550 train_loss: 3.0426 train_time: 28.2m tok/s: 928899
+2500/4550 train_loss: 3.0086 train_time: 37.9m tok/s: 865069
+3000/4550 train_loss: 2.9751 train_time: 47.5m tok/s: 827223
+3500/4550 train_loss: 2.9283 train_time: 57.2m tok/s: 802282
+4000/4550 train_loss: 2.8864 train_time: 66.8m tok/s: 784558
+4000/4550 val_loss: 2.8612 val_bpb: 1.1077
+4500/4550 train_loss: 2.8143 train_time: 76.5m tok/s: 771231
+4550/4550 val_loss: 2.8063 val_bpb: 1.0864
+peak memory allocated: 39152 MiB reserved: 39214 MiB
+ema:applying EMA weights
+pre-quantization post-ema val_loss:2.80317150 val_bpb:1.08519504 eval_time:22424ms
+Serialized model: 135431033 bytes
+Code size: 48583 bytes
+GPTQ:collecting Hessians from calibration data...
+GPTQ:collected 67 Hessians in 13.2s
+Quantized weights:
+  gptq (int6): blocks.attn.c_k.weight, blocks.attn.c_q.weight, blocks.attn.c_v.weight, blocks.attn.proj.weight, blocks.mlp.fc.weight, blocks.mlp.proj.weight
+  gptq (int8): tok_emb.weight
+  passthrough (float16): blocks.attn.q_gain, blocks.attn_scale, blocks.mlp_scale, blocks.resid_mix, skip_gates, skip_weights
+Serialized model quantized+brotli: 15976196 bytes
+Total submission size quantized+brotli: 16024779 bytes
+quantized val_loss:2.83527535 val_bpb:1.09762344 eval_time:40284ms
+quantized_sliding_window val_loss:2.79175639 val_bpb:1.08077590 eval_time:730840ms
+baseline_rc=0
+'logs/baseline.txt' -> '../../records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/baseline.log'
+'final_model.int6.ptz' -> '../../records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/baseline.final_model.int6.ptz'
+'final_model.pt' -> 'final_model.baseline.pt'
+==== baseline: end (2026-04-26T17:08:58Z) ====
+==== intradoc: start (2026-04-26T17:08:58Z) ====
+Hyperparameters:
+  adam_eps: 1e-08
+  adam_wd: 0.02
+  beta1: 0.9
+  beta2: 0.95
+  compressor: brotli
+  data_dir: ./data
+  datasets_dir: ./data/datasets/fineweb10B_sp8192
+  distributed: False
+  ema_decay: 0.9965
+  embed_bits: 8
+  embed_clip_sigmas: 20.0
+  embed_lr: 0.6
+  embed_wd: 0.085
+  embedding_dim: 512
+  enable_looping_at: 0.35
+  etlb_clip: 3.0
+  etlb_enabled: False
+  etlb_lr: 0.05
+  etlb_steps: 5
+  eval_seq_len: 2048
+  eval_stride: 64
+  gptq_calibration_batches: 64
+  gptq_reserve_seconds: 12.0
+  grad_accum_steps: 8
+  grad_clip_norm: 0.3
+  head_lr: 0.008
+  is_main_process: True
+  iterations: 4550
+  ln_scale: True
+  local_rank: 0
+  logfile: logs/intradoc.txt
+  logit_softcap: 30.0
+  loop_end: 5
+  loop_start: 3
+  matrix_bits: 6
+  matrix_clip_sigmas: 12.85
+  matrix_lr: 0.022
+  max_wallclock_seconds: 0.0
+  min_lr: 0.0
+  mlp_mult: 4.0
+  model_dim: 512
+  model_path: final_model.pt
+  muon_backend_steps: 5
+  muon_beta2: 0.95
+  muon_momentum: 0.99
+  muon_momentum_warmup_start: 0.92
+  muon_momentum_warmup_steps: 1500
+  muon_row_normalize: True
+  muon_wd: 0.095
+  num_heads: 8
+  num_kv_heads: 4
+  num_layers: 11
+  num_loops: 2
+  parallel_residual_start: 7
+  qk_gain_init: 5.0
+  quantized_model_path: final_model.int6.ptz
+  rank: 0
+  rope_base: 10000.0
+  rope_dims: 16
+  rope_train_seq_len: 2048
+  run_id: intradoc
+  scalar_lr: 0.02
+  seed: 42
+  skip_gates_enabled: True
+  sliding_window_enabled: True
+  tie_embeddings: True
+  tied_embed_init_std: 0.005
+  tied_embed_lr: 0.03
+  tokenizer_path: ./data/tokenizers/fineweb_8192_bpe.model
+  train_batch_tokens: 786432
+  train_files: ./data/datasets/fineweb10B_sp8192/fineweb_train_*.bin
+  train_log_every: 500
+  train_seq_len: 2048
+  ttt_chunk_tokens: 32768
+  ttt_enabled: False
+  ttt_epochs: 3
+  ttt_lr: 0.005
+  ttt_momentum: 0.9
+  val_batch_tokens: 524288
+  val_files: ./data/datasets/fineweb10B_sp8192/fineweb_val_*.bin
+  val_loss_every: 4000
+  vocab_size: 8192
+  warmdown_frac: 0.72
+  warmup_steps: 20
+  world_size: 1
+  xsa_last_n: 11
+train_shards: 80
+val_tokens: 40540160
+model_params:35944536
+warmup_step: 1/20
+warmup_step: 2/20
+warmup_step: 3/20
+warmup_step: 4/20
+warmup_step: 5/20
+warmup_step: 6/20
+warmup_step: 10/20
+warmup_step: 20/20
+loop_warmup:enabled encoder:[0, 1, 2, 3, 4, 5, 3, 4] decoder:[5, 3, 4, 5, 6, 7, 8, 9, 10]
+loop_warmup_step: 1/20
+loop_warmup_step: 2/20
+loop_warmup_step: 3/20
+loop_warmup_step: 4/20
+loop_warmup_step: 5/20
+loop_warmup_step: 6/20
+loop_warmup_step: 10/20
+loop_warmup_step: 20/20
+0/4550 val_loss: 9.0090 val_bpb: 3.4877
+1/4550 train_loss: 9.0096 train_time: 0.0m tok/s: 1055075
+2/4550 train_loss: 12.3274 train_time: 0.0m tok/s: 1049756
+3/4550 train_loss: 11.1188 train_time: 0.0m tok/s: 1044556
+4/4550 train_loss: 9.5141 train_time: 0.1m tok/s: 1042643
+5/4550 train_loss: 8.3461 train_time: 0.1m tok/s: 1040782
+500/4550 train_loss: 3.3391 train_time: 6.3m tok/s: 1033047
+1000/4550 train_loss: 3.2235 train_time: 12.7m tok/s: 1034844
+1500/4550 train_loss: 3.1563 train_time: 19.0m tok/s: 1035901
+layer_loop:enabled step:1593 frac:0.350 encoder:[0, 1, 2, 3, 4, 5, 3, 4] decoder:[5, 3, 4, 5, 6, 7, 8, 9, 10]
+2000/4550 train_loss: 3.0410 train_time: 27.9m tok/s: 939740
+2500/4550 train_loss: 3.0093 train_time: 37.4m tok/s: 876103
+3000/4550 train_loss: 2.9751 train_time: 46.9m tok/s: 838309
+3500/4550 train_loss: 2.9274 train_time: 56.4m tok/s: 813305
+4000/4550 train_loss: 2.8866 train_time: 65.9m tok/s: 795564
+4000/4550 val_loss: 2.8615 val_bpb: 1.1078
+4500/4550 train_loss: 2.8153 train_time: 75.4m tok/s: 782341
+4550/4550 val_loss: 2.8068 val_bpb: 1.0866
+peak memory allocated: 39150 MiB reserved: 39214 MiB
+ema:applying EMA weights
+pre-quantization post-ema val_loss:2.80370513 val_bpb:1.08540163 eval_time:21921ms
+Serialized model: 135431033 bytes
+Code size: 56734 bytes
+GPTQ:collecting Hessians from calibration data...
+GPTQ:collected 67 Hessians in 13.2s
+Quantized weights:
+  gptq (int6): blocks.attn.c_k.weight, blocks.attn.c_q.weight, blocks.attn.c_v.weight, blocks.attn.proj.weight, blocks.mlp.fc.weight, blocks.mlp.proj.weight
+  gptq (int8): tok_emb.weight
+  passthrough (float16): blocks.attn.q_gain, blocks.attn_scale, blocks.mlp_scale, blocks.resid_mix, skip_gates, skip_weights
+Serialized model quantized+brotli: 15978513 bytes
+Total submission size quantized+brotli: 16035247 bytes
+quantized val_loss:2.83448214 val_bpb:1.09731637 eval_time:17797ms
+quantized_sliding_window val_loss:2.79212840 val_bpb:1.08091991 eval_time:713529ms
+intradoc_rc=0
+'logs/intradoc.txt' -> '../../records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/intradoc.log'
+'final_model.int6.ptz' -> '../../records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/intradoc.final_model.int6.ptz'
+==== intradoc: end (2026-04-26T18:43:44Z) ====
+==== results: aggregate + commit (2026-04-26T18:43:44Z) ====
+B_BPB=1.08077590 I_BPB=1.08091991 DELTA=+0.0001
+[doc-mask 36ab96b] Record: intra-doc mask vs baseline (1×H100, SEED=42, intradoc=1.08091991 vs baseline=1.08077590, Δ=+0.0001)
+ 4 files changed, 199 insertions(+)
+ create mode 100644 records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/README.md
+ create mode 100644 records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/intradoc.final_model.int6.ptz
+ create mode 100644 records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/intradoc.log
+ create mode 100644 records/track_non_record_16mb/2026-04-26_intradoc_vs_baseline_1xH100/results.tsv
+fatal: could not read Username for 'https://github.com': No such device or address
+push_rc=128
+==== pipeline done: 2026-04-26T18:43:45Z ====
+SUMMARY: baseline=1.08077590 intradoc=1.08091991 delta=+0.0001 push_rc=128
